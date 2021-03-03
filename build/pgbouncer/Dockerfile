@@ -1,38 +1,27 @@
-ARG BASEOS
-ARG BASEVER
-ARG PG_FULL
-ARG PREFIX
-FROM ${PREFIX}/crunchy-base:${BASEOS}-${PG_FULL}-${BASEVER}
+FROM perconalab/percona-postgres-operator:main-base
 
-# For RHEL8 all arguments used in main code has to be specified after FROM
-ARG DFSET
-ARG PACKAGER
+RUN set -ex; \
+    curl -Lf -o /tmp/c-ares.rpm http://mirror.centos.org/centos/8/BaseOS/x86_64/os/Packages/c-ares-1.13.0-5.el8.x86_64.rpm; \
+    rpmkeys --checksig /tmp/c-ares.rpm; \
+    rpm -i /tmp/c-ares.rpm; \
+    rm -rf /tmp/c-ares.rpm
 
-ARG PG_MAJOR
-
-LABEL name="pgbouncer" \
-	summary="Lightweight connection pooler for crunchy-postgres" \
-	description="The aim of crunchy-pgbouncer is to lower the performance impact of opening new connections to PostgreSQL; clients connect through this service. It offers session, transaction and statement pooling." \
-	io.k8s.description="pgBouncer" \
-	io.k8s.display-name="pgBouncer" \
-	io.openshift.tags="postgresql,postgres,pooling,pgbouncer,database,crunchy"
-
-RUN ${PACKAGER} -y install \
+RUN set -ex; \
+    microdnf -y install \
 	--disablerepo="epel" \
-	--setopt=skip_missing_names_on_install=False \
-	pgbouncer \
-	&& ${PACKAGER} -y clean all
+    c-ares \
+	percona-pgbouncer; \
+	microdnf -y clean all
 
-# Preserving PGVERSION out of paranoia
-ENV PGVERSION="${PG_MAJOR}"
+ENV PGVERSION 13
 
 RUN mkdir -p /opt/crunchy/bin /opt/crunchy/conf /pgconf
 
-ADD bin/pgbouncer /opt/crunchy/bin
-ADD bin/common /opt/crunchy/bin
-ADD conf/pgbouncer /opt/crunchy/conf
+COPY bin/pgbouncer /opt/crunchy/bin
+COPY bin/common /opt/crunchy/bin
+COPY conf/pgbouncer /opt/crunchy/conf
 
-RUN chown -R 2:0 /opt/crunchy /pgconf && \
+RUN chown -R 2:0 /opt/crunchy /pgconf; \
 	chmod -R g=u /opt/crunchy /pgconf
 
 EXPOSE 6432

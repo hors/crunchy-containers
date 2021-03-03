@@ -1,21 +1,9 @@
-ARG BASEOS
-ARG DOCKERBASEREGISTRY
-FROM ${DOCKERBASEREGISTRY}${BASEOS}
+FROM registry.access.redhat.com/ubi8/ubi-minimal
 
-# For RHEL8 all arguments used in main code has to be specified after FROM
-ARG BASEOS
-ARG RELVER
-ARG DFSET
-ARG PACKAGER
-ARG PG_LBL 
-
-MAINTAINER Crunchy Data <info@crunchydata.com>
-
-LABEL vendor="Crunchy Data" \
-	url="https://crunchydata.com" \
-	release="${RELVER}" \
-	org.opencontainers.image.vendor="Crunchy Data" \
-	os.version="7.7"
+LABEL vendor="Percona" \
+	url="https://percona.com" \
+	org.opencontainers.image.vendor="Percona" \
+	maintainer="Percona Development <info@percona.com>"
 
 COPY conf/licenses /licenses
 COPY redhat/atomic/help.1 /help.1
@@ -23,100 +11,41 @@ COPY redhat/atomic/help.md /help.md
 COPY licenses /licenses
 
 # Have to install glibc-langpack-en on UBI8 otherwise en_US.utf-8 does not exist
-RUN if [ "$BASEOS" = "ubi8" ] ; then \
-        echo "INSIDE UBI8" \
-        ${PACKAGER} -y update \
-        && ${PACKAGER} -y install \
-                --setopt=skip_missing_names_on_install=False \
-                glibc-langpack-en ; \
-fi
+RUN microdnf -y update; \
+    microdnf -y install glibc-langpack-en
 
 ENV LC_ALL en_US.utf-8
 ENV LANG en_US.utf-8
 
-ARG EPEL7_RPM=https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-ARG EPEL8_RPM=https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
+RUN set -ex; \
+    export GNUPGHOME="$(mktemp -d)"; \
+    gpg --batch --keyserver ha.pool.sks-keyservers.net --recv-keys 430BDF5C56E7C94E848EE60C1C4CBDCDCD2EFD2A 99DB70FAE1D7CE227FB6488205B555B38483C65D 94E279EB8D8F25B21810ADF121EA45AB2F86D6A1; \
+    gpg --batch --export --armor 430BDF5C56E7C94E848EE60C1C4CBDCDCD2EFD2A > ${GNUPGHOME}/RPM-GPG-KEY-Percona; \
+    gpg --batch --export --armor 99DB70FAE1D7CE227FB6488205B555B38483C65D > ${GNUPGHOME}/RPM-GPG-KEY-centosofficial; \
+    gpg --batch --export --armor 94E279EB8D8F25B21810ADF121EA45AB2F86D6A1 > ${GNUPGHOME}/RPM-GPG-KEY-EPEL-8; \
+    rpmkeys --import ${GNUPGHOME}/RPM-GPG-KEY-Percona ${GNUPGHOME}/RPM-GPG-KEY-centosofficial ${GNUPGHOME}/RPM-GPG-KEY-EPEL-8; \
+    microdnf install -y findutils; \
+    curl -Lf -o /tmp/percona-release.rpm https://repo.percona.com/yum/percona-release-latest.noarch.rpm; \
+    rpmkeys --checksig /tmp/percona-release.rpm; \
+    rpm -i /tmp/percona-release.rpm; \
+    rm -rf "$GNUPGHOME" /tmp/percona-release.rpm; \
+    rpm --import /etc/pki/rpm-gpg/PERCONA-PACKAGING-KEY
 
-RUN if [ "$BASEOS" = "rhel7" ] ; then \
-	${PACKAGER} -y --enablerepo=rhel-7-server-ose-3.11-rpms update \
-	&& ${PACKAGER} -y install \
-		--setopt=skip_missing_names_on_install=False \
-		${EPEL7_RPM} \
-		bind-utils \
-		gettext \
-		hostname \
-		procps-ng \
-	&& sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*.repo \
-	&& ${PACKAGER} -y clean all --enablerepo=rhel-7-server-ose-3.11-rpms ; \
-fi
+RUN set -ex; \
+    curl -Lf -o /tmp/epel-release.rpm https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm; \
+    rpmkeys --checksig /tmp/epel-release.rpm; \
+    microdnf -y update; \
+    microdnf -y install \
+        bind-utils \
+        gettext \
+        hostname \
+        perl \
+        procps-ng; \
+    rpm -i /tmp/epel-release.rpm; \
+    sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*.repo; \
+    rm -rf /tmp/epel-release.rpm; \
+    microdnf clean all
 
-RUN if [ "$BASEOS" = "ubi7" ] ; then \
-        ${PACKAGER} -y --enablerepo=rhel-7-server-ose-3.11-rpms update \
-        && ${PACKAGER} -y install \
-                --setopt=skip_missing_names_on_install=False \
-                ${EPEL7_RPM} \
-                bind-utils \
-                gettext \
-                hostname \
-                procps-ng \
-        && sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*.repo \
-        && ${PACKAGER} -y clean all --enablerepo=rhel-7-server-ose-3.11-rpms ; \
-fi
-
-RUN if [ "$BASEOS" = "ubi8" ] ; then \
-        ${PACKAGER} -y update \
-        && ${PACKAGER} -y install \
-                --setopt=skip_missing_names_on_install=False \
-                ${EPEL8_RPM} \
-                bind-utils \
-                gettext \
-                hostname \
-                procps-ng \
-        && sed -i 's/enabled=1/enabled=0/' /etc/yum.repos.d/epel*.repo \
-        && ${PACKAGER} -y clean all ; \
-fi
-
-RUN if [ "$BASEOS" = "centos7" ] ; then \
-        ${PACKAGER} -y update \
-        && ${PACKAGER} -y install \
-                --setopt=skip_missing_names_on_install=False \
-                epel-release \
-                bind-utils \
-                gettext \
-                hostname \
-                procps-ng \
-        && ${PACKAGER} -y clean all ; \
-fi
-
-RUN if [ "$BASEOS" = "centos8" ] ; then \
-	${PACKAGER} -y update \
-	&& ${PACKAGER} -y install \
-		--setopt=skip_missing_names_on_install=False \
-		epel-release \
-		glibc-langpack-en \
-		bind-utils \
-		gettext \
-		hostname \
-		procps-ng \
-	&& ${PACKAGER} -y clean all ; \
-fi
-
-# Crunchy Postgres repo GPG Keys
-# Both keys are added to support building all PG versions
-# of this container. PG 11+ requires RPM-GPG-KEY-crunchydata
-# PG 9.5, 9.6 and 10 require CRUNCHY-GPG-KEY.public on RHEL machines
-ADD conf/*KEY* /
-
-# Add any available Crunchy PG repo files
-ADD conf/crunchypg${PG_LBL}.repo /etc/yum.repos.d/
-# Import both keys to support all required repos
-RUN rpm --import RPM-GPG-KEY-crunchydata*
-RUN if [ "$DFSET" = "rhel" ] ; then rpm --import CRUNCHY-GPG-KEY.public ; fi
-
-RUN if [ "$BASEOS" = "centos8" ] ; then \
-	${PACKAGER} -qy module disable postgresql ; \
-fi
-
-RUN if [ "$BASEOS" = "ubi8" ] ; then \
-	${PACKAGER} -qy module disable postgresql ; \
-fi
+RUN set -ex; \
+    percona-release enable ppg-13 experimental; \
+    percona-release enable ppg-13.2 testing

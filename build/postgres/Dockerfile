@@ -1,90 +1,64 @@
-ARG BASEOS
-ARG BASEVER
-ARG PG_FULL
-ARG PREFIX
-ARG BASE_IMAGE_NAME
-FROM ${PREFIX}/${BASE_IMAGE_NAME}:${BASEOS}-${PG_FULL}-${BASEVER}
+FROM perconalab/percona-postgres-operator:main-base
 
-# For RHEL8 all arguments used in main code has to be specified after FROM
-ARG PG_FULL
-ARG BASEOS
-ARG DFSET
-ARG PACKAGER
 
 # ===== Early lines ordered for leveraging cache, reorder carefully =====
-ARG PG_MAJOR
-# Needed due to lack of environment substitution trick on ADD
-ARG PG_LBL
+ENV PG_MAJOR 13
 
-RUN ${PACKAGER} -y install \
-	--setopt=skip_missing_names_on_install=False \
-	--disablerepo=crunchypg* \
-	--enablerepo="crunchypg${PG_LBL}" \
-	postgresql${PG_LBL} \
- && ${PACKAGER} -y clean all
+RUN set -ex; \
+    microdnf -y install \
+        libpq \
+        llvm9.0 \
+        openssh \
+	    percona-postgresql${PG_MAJOR//.}; \
+    microdnf -y clean all
 
 # Preserving PGVERSION out of paranoia
 ENV PGROOT="/usr/pgsql-${PG_MAJOR}" PGVERSION="${PG_MAJOR}"
 
-ARG BACKREST_VER
+RUN set -ex; \
+    curl -Lf -o /tmp/perl-DBI.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-DBI-1.641-3.module_el8.1.0+199+8f0a6bbd.x86_64.rpm; \
+    curl -Lf -o /tmp/openssh-server.rpm http://mirror.centos.org/centos/8/BaseOS/x86_64/os/Packages/openssh-server-8.0p1-5.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/openssh-clients.rpm http://mirror.centos.org/centos/8/BaseOS/x86_64/os/Packages/openssh-clients-8.0p1-5.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/perl-libxml-perl.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-libxml-perl-0.08-33.el8.noarch.rpm; \
+    curl -Lf -o /tmp/perl-DBD-Pg.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-DBD-Pg-3.7.4-4.module_el8.3.0+426+0b4e9c0a.x86_64.rpm; \
+    curl -Lf -o /tmp/perl-XML-Parser.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-XML-Parser-2.44-11.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/perl-DBI.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-DBI-1.641-3.module_el8.1.0+199+8f0a6bbd.x86_64.rpm; \
+    curl -Lf -o /tmp/llvm-libs.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/llvm-libs-10.0.1-3.module_el8.3.0+467+cb298d5b.x86_64.rpm; \
+    curl -Lf -o /tmp/llvm.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/llvm-10.0.1-3.module_el8.3.0+467+cb298d5b.x86_64.rpm; \
+    rpmkeys --checksig /tmp/perl-DBI.rpm /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm; \
+    rpm -i /tmp/perl-DBI.rpm /tmp/llvm-libs.rpm /tmp/llvm.rpm /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm; \
+    rm -rf /tmp/perl-DBI.rpm /tmp/llvm-libs.rpm /tmp/llvm.rpm /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm
 
-# Separate yum run matching postgres-ha image, leverages cached layer
-RUN if [ "$DFSET" = "centos" ] ; then \
-        ${PACKAGER} -y install \
-        	--setopt=skip_missing_names_on_install=False \
-        	openssh-clients \
-        	openssh-server \
-        	pgaudit${PG_MAJOR//.} \
-        	pgaudit${PG_MAJOR//.}_set_user \
-        	crunchy-backrest-${BACKREST_VER} \
-        	postgresql${PG_MAJOR//.}-contrib \
-        	postgresql${PG_MAJOR//.}-server \
-        	postgresql${PG_MAJOR//.}-plpython* \
-        	pgnodemx${PG_MAJOR//.} \
-        	$( printf '11\n'${PG_MAJOR} | sort -VC && echo postgresql${PG_MAJOR}-llvmjit ) \
-        	psmisc \
-        	rsync \
-        	wal2json${PG_MAJOR//.} \
-        	file \
-        	gettext \
-        	hostname \
-        	procps-ng \
-        	pgaudit_analyze \
-        	unzip \
-        && ${PACKAGER} -y clean all ; \
-else \
-        ${PACKAGER} -y install \
+RUN  set -ex; \
+     microdnf -y install \
 		--enablerepo="epel" \
-		--setopt=skip_missing_names_on_install=False \
-		openssh-clients \
-		openssh-server \
-		pgaudit${PG_MAJOR//.} \
-		pgaudit${PG_MAJOR//.}_set_user \
-		crunchy-backrest-${BACKREST_VER} \
-		postgresql${PG_MAJOR//.}-contrib \
-		postgresql${PG_MAJOR//.}-server \
-		postgresql${PG_MAJOR//.}-plpython* \
-		pgnodemx${PG_MAJOR//.} \
-		$( printf '11\n'${PG_MAJOR} | sort -VC && echo postgresql${PG_MAJOR}-llvmjit ) \
+		percona-pgaudit \
+		percona-pgaudit${PG_MAJOR//.}_set_user \
+		percona-pgbackrest \
+		percona-postgresql${PG_MAJOR//.}-contrib \
+		percona-postgresql${PG_MAJOR//.}-server \
+		percona-postgresql${PG_MAJOR//.}-plpython* \
+		percona-pg-stat-monitor${PG_MAJOR//.} \
+		percona-postgresql${PG_MAJOR//.}-llvmjit \
 		psmisc \
 		rsync \
-		wal2json${PG_MAJOR//.} \
+		perl \
+		percona-wal2json${PG_MAJOR//.} \
 		file \
-		unzip \
-	&& ${PACKAGER} -y install \
-		--setopt=tsflags='' \
-		--enablerepo="epel" \
-		pgaudit_analyze \
-	&& ${PACKAGER} -y clean all --enablerepo="epel" ; \
-fi
+		unzip; \
+#	 microdnf -y install \
+#		--setopt=tsflags='' \
+#		--enablerepo="epel" \
+#		pgaudit_analyze; \
+	microdnf -y clean all --enablerepo="epel"
 
 # ===== Steps unique to this image after here =====
 LABEL name="postgres" \
-	summary="PostgreSQL ${PG_FULL}" \
-	description="Allows multiple deployment methods for PostgreSQL, including basic single primary, streaming replication with synchronous and asynchronous replicas. Includes utilities and tools for Auditing (pgaudit), statement tracking,  Backup/Restore (pgbackrest, pg_basebackup, pgdump, pgrestore) and Benchmarking (pgbench)." \
-	io.k8s.description="Crunchy PostgreSQL is the trusted open source distribution of PostgreSQL" \
-	io.k8s.display-name="Crunchy PostgreSQL" \
-	io.openshift.tags="postgresql,postgres,sql,nosql,database,crunchy"
+	summary="PostgreSQL ${PG_MAJOR}" \
+	description="Allows multiple deployment methods for PostgreSQL, including basic single primary, streaming replication with synchronous and asynchronous replicas. Includes utilities and tools for Auditing (percona-pgaudit), statement tracking,  Backup/Restore (percona-pgbackrest)." \
+	io.k8s.description="Percona PostgreSQL is the trusted open source distribution of PostgreSQL" \
+	io.k8s.display-name="Percona PostgreSQL" \
+	io.openshift.tags="postgresql,postgres,sql,nosql,database,percona"
 
 # set up crunchy directory
 RUN mkdir -p /opt/crunchy/bin /opt/crunchy/conf /pgdata /pgwal /pgconf /recover /backrestrepo
@@ -100,7 +74,7 @@ EXPOSE 5432
 ADD bin/postgres_common /opt/crunchy/bin
 ADD bin/common /opt/crunchy/bin
 ADD conf/postgres_common /opt/crunchy/conf
-ADD tools/pgmonitor/exporter/postgres /opt/crunchy/bin/modules/pgexporter
+#ADD tools/pgmonitor/exporter/postgres /opt/crunchy/bin/modules/pgexporter
 
 RUN chmod g=u /etc/passwd && \
 	chmod g=u /etc/group

@@ -1,27 +1,35 @@
-ARG BASEOS
-ARG BASEVER
-ARG PG_FULL
-ARG PREFIX
-FROM ${PREFIX}/crunchy-base:${BASEOS}-${PG_FULL}-${BASEVER}
+FROM golang:1.13 AS go_builder
+WORKDIR /go/src/github.com/hors/crunchy-containers/src
 
-# For RHEL8 all arguments used in main code has to be specified after FROM
-ARG PACKAGER
-ARG BACKREST_VER
+COPY go.* /go/src/github.com/hors/crunchy-containers/src/
+COPY cmd/pgbackrest/main.go /go/src/github.com/hors/crunchy-containers/src/
+RUN go build -o pgbackrest
 
-LABEL name="pgbackrest" \
-	summary="Crunchy pgBackRest ${BACKREST_VER}" \
-	description="The Crunchy pgBackRest container that supports pgBackRest backups, restores, and repo functionality modes." \
-	io.k8s.description="pgBackRest" \
-	io.k8s.display-name="Crunchy pgBackRest" \
-	io.openshift.tags="postgresql,postgres,pgbackrest,backup,database,crunchy"
+FROM perconalab/percona-postgres-operator:main-base
+
+RUN set -ex; \
+    microdnf -y install  \
+	    openssh \
+        systemd \
+        libpq \
+        libedit 
+
+RUN set -ex; \
+    curl -Lf -o /tmp/perl-DBI.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-DBI-1.641-3.module_el8.1.0+199+8f0a6bbd.x86_64.rpm; \
+    curl -Lf -o /tmp/perl-XML-Parser.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-XML-Parser-2.44-11.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/openssh-server.rpm http://mirror.centos.org/centos/8/BaseOS/x86_64/os/Packages/openssh-server-8.0p1-5.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/openssh-clients.rpm http://mirror.centos.org/centos/8/BaseOS/x86_64/os/Packages/openssh-clients-8.0p1-5.el8.x86_64.rpm; \
+    curl -Lf -o /tmp/perl-libxml-perl.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-libxml-perl-0.08-33.el8.noarch.rpm; \
+    curl -Lf -o /tmp/perl-DBD-Pg.rpm http://mirror.centos.org/centos/8/AppStream/x86_64/os/Packages/perl-DBD-Pg-3.7.4-4.module_el8.3.0+426+0b4e9c0a.x86_64.rpm; \
+    rpmkeys --checksig /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm; \
+    rpm -i /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm; \
+    rm -rf /tmp/perl-DBI.rpm /tmp/perl-XML-Parser.rpm /tmp/openssh-server.rpm /tmp/openssh-clients.rpm /tmp/perl-libxml-perl.rpm /tmp/perl-DBD-Pg.rpm
 
 # Run postgres install in separate transaction ahead of backrest for postgres user
-RUN ${PACKAGER} -y install  \
-	--setopt=skip_missing_names_on_install=False \
-	openssh-clients \
-	openssh-server \
-	crunchy-backrest-${BACKREST_VER} \
-	&& ${PACKAGER} -y clean all
+RUN set -ex; \
+    microdnf -y install  \
+	   percona-pgbackrest; \
+	microdnf -y clean all
 
 
 # add postgres user and group
@@ -31,16 +39,16 @@ RUN groupadd postgres -g 26 && useradd postgres -u 26 -g 26
 RUN mkdir -p /opt/crunchy/bin /opt/crunchy/conf /pgdata /backrestrepo \
 	/var/log/pgbackrest
 
+RUN pwd; ls -al
 # add pgbackrest-restore files
-ADD bin/pgbackrest-restore /opt/crunchy/bin
-ADD conf/pgbackrest-restore /opt/crunchy/conf
+COPY bin/pgbackrest-restore /opt/crunchy/bin
+COPY conf/pgbackrest-restore /opt/crunchy/conf
 
 # add pgbackrest files
-ADD bin/pgbackrest /opt/crunchy/bin
-
+COPY --from=go_builder /go/src/github.com/hors/crunchy-containers/src/pgbackrest /opt/crunchy/bin/
 # add pgbackrest-common files
-ADD bin/common /opt/crunchy/bin
-ADD bin/pgbackrest-common /opt/crunchy/bin
+COPY bin/common /opt/crunchy/bin
+COPY bin/pgbackrest-common /opt/crunchy/bin
 
 # set user and group ownership
 RUN chown -R postgres:postgres /opt/crunchy  \
@@ -48,15 +56,15 @@ RUN chown -R postgres:postgres /opt/crunchy  \
 
 # add the pgbackrest-repo specific files and directories, and
 # set the appropriate permissions and ownership
-ADD bin/pgbackrest-repo /usr/local/bin
-RUN chmod +x /usr/local/bin/pgbackrest-repo.sh /usr/local/bin/archive-push-s3.sh \
-	&& mkdir -p /etc/pgbackrest \
-	&& chown -R postgres:postgres /etc/pgbackrest
+COPY bin/pgbackrest-repo /usr/local/bin
+RUN chmod +x /usr/local/bin/pgbackrest-repo.sh /usr/local/bin/archive-push-s3.sh; \
+	mkdir -p /etc/pgbackrest; \
+	chown -R postgres:postgres /etc/pgbackrest
 
-RUN chmod g=u /etc/passwd \
-	&& chmod g=u /etc/group \
-	&& chmod -R g=u /etc/pgbackrest \
-	&& rm -f /run/nologin
+RUN chmod g=u /etc/passwd; \
+	chmod g=u /etc/group; \
+	chmod -R g=u /etc/pgbackrest; \
+	rm -f /run/nologin
 
 RUN mkdir /.ssh && chown postgres:postgres /.ssh && chmod o+rwx /.ssh
 
